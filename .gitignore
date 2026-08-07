@@ -1,0 +1,7 @@
+.vs
+.vs/*
+out
+out/*
+CMakePresets.json
+CMakeSettings.json
+binaries/*
