@@ -10,7 +10,7 @@ const std::string ProtoTypeNames[6] = { "Items", "Critters", "Scenery", "Walls",
 std::vector<std::string> tiles_names;
 
 bool ReadFallMap(std::filesystem::path& filename, FallMap_t*& file)
-{
+{	
 	delete file;
 	file = nullptr;
 	ByteReader* reader = new ByteReader;
@@ -23,8 +23,9 @@ bool ReadFallMap(std::filesystem::path& filename, FallMap_t*& file)
 	return true;
 }
 
-void ExportFallMap(FallMap_t*& file)
+void FallMapWindow::ExportFallMap(FallMap_t*& file)
 {
+	EnsureTilesLoaded();
 	std::ofstream out;
 	out.open(file->Filename + ".fomap");
 	if (out.is_open())
@@ -95,6 +96,7 @@ void ExportFallMap(FallMap_t*& file)
 				}
 				else
 				{
+					ImGui::DebugLog("[ERROR] Tile ID %d out of bounds! tiles_names size is %zu\n", currentTile.TileId, tiles_names.size());
 					// FALLBACK: If out-of-bounds, append a hardcoded generic name or string index 
 					// so the map saves the grid data and the Mapper tool can load it!
 					tileTextureName = std::format("art\\tiles\\tile_{:03}.frm", currentTile.TileId);
@@ -114,6 +116,7 @@ void ExportFallMap(FallMap_t*& file)
 				{
 					// FALLBACK: Provide generic string mapping for out-of-bounds roofs
 					roofTextureName = std::format("art\\tiles\\roof_{:03}.frm", currentTile.RoofId);
+					ImGui::DebugLog("[ERROR] Tile ID %d out of bounds! roof_ size is %zu\n", currentTile.TileId, tiles_names.size());
 				}
 				out << std::format("{:10} {:<4} {:<4}           {}\n", "roof", X, Y, roofTextureName);
 			}
@@ -312,20 +315,43 @@ void FallMapWindow::DrawWin()
 void FallMapWindow::InitWin()
 {
 	ImGui::DebugLog("Initializing Fallout .MAP Tool...\n");
+}
 
-	std::string currString;
-	std::filesystem::path tilesPath = progSettings.falloutPath + "/art/tiles/TILES.LST";
+void FallMapWindow::EnsureTilesLoaded()
+{
+	if (!tiles_names.empty())
+		return;
+
+	std::filesystem::path basePath = std::filesystem::path(progSettings.falloutPath);
+	std::filesystem::path tilesPath = basePath / "art" / "tiles" / "TILES.LST";
+
+	if (!std::filesystem::exists(tilesPath)) {
+		tilesPath = basePath / "data" / "art" / "tiles" / "TILES.LST";
+	}
+	if (!std::filesystem::exists(tilesPath)) {
+		tilesPath = basePath / "TILES.LST";
+	}
+
 	std::ifstream input(tilesPath);
 	if (input.is_open())
 	{
+		std::string currString;
 		while (getline(input, currString))
 		{
+			if (!currString.empty() && currString.back() == '\r') {
+				currString.pop_back();
+			}
 			tiles_names.push_back(currString);
 		}
+		input.close();
+		ImGui::DebugLog("[SUCCESS] Loaded %zu tile names from configured path: %s\n",
+			tiles_names.size(), std::filesystem::absolute(tilesPath).string().c_str());
 	}
-	input.close();
-
-	ImGui::DebugLog("Fallout .MAP Tool Init Done.\n");
+	else
+	{
+		ImGui::DebugLog("[ERROR] Failed to open TILES.LST. Check your Fallout Path in settings! Tried: %s\n",
+			std::filesystem::absolute(tilesPath).string().c_str());
+	}
 }
 
 void FallMapWindow::DestroyWin() { }
