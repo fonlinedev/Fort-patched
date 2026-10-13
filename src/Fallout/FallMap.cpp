@@ -2,6 +2,7 @@
 #include "FallProto.h"
 #include "../FORT.h"
 #include <filesystem>
+#include <stdexcept>
 
 const std::string ProtoTypeNames[6] = { "Items", "Critters", "Scenery", "Walls", "Tiles", "Misc" };
 
@@ -51,7 +52,16 @@ void skip_scripts(ByteReader* reader)
 				case 4:
 					break;
 				default:
-					printf("Unknown script PID = %i\n", pid);
+					printf(
+						"Unknown script PID=%d section=%zu entry=%zu "
+						"count=%u loop=%u\n",
+						pid,
+						script_section,
+						j,
+						script_section_count,
+						loop
+					);
+
 					break;
 				}
 				for (uint8_t i = 0; i < 14; i++)
@@ -187,6 +197,42 @@ FallMapObject_t::FallMapObject_t(ByteReader* reader)
 	reader->u32();
 	reader->u32();
 
+	printf(
+		"Object header: ObjectPos=%d PIDType=%u PIDNum=%u "
+		"FIDType=%u FIDNum=%u MapElev=%u InvenSize=%u\n",
+		ObjectPos,
+		static_cast<unsigned>(PIDType),
+		static_cast<unsigned>(PIDNum),
+		static_cast<unsigned>(FIDType),
+		static_cast<unsigned>(FIDNum),
+		static_cast<unsigned>(MapElev),
+		static_cast<unsigned>(InvenSize)
+	);
+
+	if (PIDType >= ProtoLsts.size())
+	{
+		printf(
+			"Invalid PIDType=%u PIDNum=%u ObjectPos=%d\n",
+			static_cast<unsigned>(PIDType),
+			static_cast<unsigned>(PIDNum),
+			ObjectPos
+		);
+
+		throw std::runtime_error("Invalid PIDType: MAP parsing stopped");
+	}
+
+	if (PIDNum == 0 || PIDNum > ProtoLsts[PIDType].size())
+	{
+		printf(
+			"Invalid PIDNum=%u PIDType=%u ObjectPos=%d\n",
+			static_cast<unsigned>(PIDNum),
+			static_cast<unsigned>(PIDType),
+			ObjectPos
+		);
+
+		throw std::runtime_error("Invalid PIDNum: MAP parsing stopped");
+	}
+
 	if (PIDType == PROTO_CRITTER)
 	{
 		CritData = new FallMapCritObject_t(reader);
@@ -269,6 +315,26 @@ FallMapObject_t::FallMapObject_t(ByteReader* reader)
 	}
 }
 
+static void ReadObjectWithInventory(
+	ByteReader* reader,
+	std::vector<FallMapObject_t>& objects)
+{
+	FallMapObject_t obj(reader);
+
+	if (obj.InvenSize > 1000)
+	{
+		throw std::runtime_error("Invalid inventory size: MAP parsing stopped");
+	}
+
+	for (size_t i = 0; i < obj.InvenSize; ++i)
+	{
+		reader->u32(); // Inventory amount
+		ReadObjectWithInventory(reader, objects);
+	}
+
+	objects.push_back(obj);
+}
+
 FallMap_t::FallMap_t(ByteReader* reader)
 {
 	Version = reader->u32();
@@ -332,20 +398,32 @@ FallMap_t::FallMap_t(ByteReader* reader)
 	skip_scripts(reader);
 
 	TotalObjects = reader->u32();
-	for (size_t elev = 0; elev < elevation; elev++) 
+
+	printf(
+		"Map objects: TotalObjects=%u, elevations=%d, MapFlags=0x%X\n",
+		TotalObjects,
+		elevation,
+		static_cast<unsigned int>(MapFlags)
+	);
+
+	uint64_t totalElevationObjects = 0;
+
+	for (size_t elev = 0; elev < static_cast<size_t>(elevation); elev++)
 	{
 		uint32_t objectsOnElevation = reader->u32();
 
+		totalElevationObjects += objectsOnElevation;
+
+		printf(
+			"Elevation %zu: objectsOnElevation=%u, cumulative=%llu\n",
+			elev,
+			objectsOnElevation,
+			static_cast<unsigned long long>(totalElevationObjects)
+		);
+
 		for (size_t j = 0; j < objectsOnElevation; j++)
 		{
-			FallMapObject_t newObj(reader);
-			for (size_t i = 0; i < newObj.InvenSize; i++)
-			{
-				uint32_t amount = reader->u32();
-				FallMapObject_t subObj(reader);
-				Objects.push_back(subObj);
-			}
-			Objects.push_back(newObj);
+			ReadObjectWithInventory(reader, Objects);
 		}
 	}
 }
